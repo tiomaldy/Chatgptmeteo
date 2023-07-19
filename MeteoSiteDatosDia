@@ -1,0 +1,2106 @@
+// Please see documentation at https://docs.microsoft.com/aspnet/core/client-side/bundling-and-minification
+// for details on configuring this project to bundle and minify static web assets.
+
+// Write your JavaScript code.
+
+// Meteo Script
+
+var hideParams = ['17007', '17046'];  // Lista de parametros que se deben ocultar en la vista.
+
+var startInterval = new Date(); // Se configura el intervalo de tiempo inicial a la fecha actual.
+var endInterval = new Date(); //  Se configura el intervalo de tiempo final a la fecha actual.
+
+var agrupacion = 'hour' // La agrupacion por defecto es "hora".
+
+var codeType = 'ser'; // Debe ser eliminada luego de las pruebas
+//var stationCode = '0320AECC'; // 0320AECC // 0320AECF Debe ser eliminada luego de las pruebas
+var stationCode = document.getElementById('station_id').dataset.serial;
+
+var codeType1 = 'eui';
+//var stationCode1 = '0004A30B00232287';
+var stationCode1 = '0004A30B00231A5C';
+var codeType2 = 'ser';
+var stationCode2 = document.getElementById('station_id').dataset.serial;
+
+
+function minusDays(currentDate, days) {
+    var newDate = new Date(currentDate);
+    newDate.setDate(newDate.getDate() - days);
+
+    var dd = String(newDate.getDate()).padStart(2, '0');
+    var mm = String(newDate.getMonth() + 1).padStart(2, '0'); //January is 0!
+    var yyyy = newDate.getFullYear();
+
+    return yyyy + '-' + mm + '-' + dd; // + ' ' + hour + ':' + minutes + ':' + seconds ; 
+}
+
+function addDays(currentDate, days) {
+    var newDate = new Date(currentDate);
+    newDate.setDate(newDate.getDate() + days);
+
+    var dd = String(newDate.getDate()).padStart(2, '0');
+    var mm = String(newDate.getMonth() + 1).padStart(2, '0'); //January is 0!
+    var yyyy = newDate.getFullYear();
+
+    return yyyy + '-' + mm + '-' + dd; // + ' ' + hour + ':' + minutes + ':' + seconds ; 
+}
+
+
+var field_limits_matrix = [
+    [9.76, 36.3, 61.98],  //S_lvl1 WP, FC, MAX_SAT
+    [9.77, 33.37, 66.07], //S_lvl2 WP, FC, MAX_SAT
+    [10.07, 34.71, 66.49],//S_lvl3 WP, FC, MAX_SAT
+    [10.55, 37.66, 65.45],//S_lvl4 WP, FC, MAX_SAT
+    [10.79, 38.66, 66.52],//S_lvl5 WP, FC, MAX_SAT
+    [11.52, 37.9, 65.27],  //S_lvl6 WP, FC, MAX_SAT
+    [10.03, 35.51, 65] //Root_Zone_AVG WP, FC, MAX_SAT
+];
+
+var field_limits_soil_zones = [
+    [10.03, 35.51, 65], //Root_Zone_AVG WP, FC, MAX_SAT
+    [11.15, 38.28, 65.89],
+    [10.41, 36.43, 65.3]
+];
+
+function linear_normalization(raw_data_cell, index) {
+    var result = (raw_data_cell - field_limits_matrix[index][0]) / (field_limits_matrix[index][1] - field_limits_matrix[index][0]);
+    result = result >= 0 ? (result * 100).toFixed(2) : '-';
+    return result;
+    //return raw_data_cell
+}
+
+function linear_normalization_soil_zones(raw_data_cell, index) {
+    var result = (raw_data_cell - field_limits_soil_zones[index % 3][0]) / (field_limits_soil_zones[index % 3][1] - field_limits_soil_zones[index % 3][0]);
+    result = result >= 0 ? result * 100 : 0;
+    return result;
+}
+
+function tz_utc_to_ecu(time_utc) {
+    const ec_date = new Date(`${time_utc}Z`);
+    return ec_date;
+}
+
+//////////////////////////////////////////////////////////////////
+/// Oculta los parámetros cuando la vista este cargada 
+window.Ready = function () {
+    Hide();
+};
+
+
+
+
+
+//////////////////////////////////////////////////////////////////
+/// Configura el tipo de código a usar
+function setCodeType(TempcodeType) {
+    codeType = TempcodeType;
+}
+
+
+//////////////////////////////////////////////////////////////////
+/// Configura el código de la estación
+function setCodeType(TempStationCode) {
+    stationCode = TempStationCode;
+}
+
+
+//////////////////////////////////////////////////////////////////
+///  Función del selector de tiempo flatpickr
+const dateAndTime = flatpickr("#dateInput", {
+    altInput: true,
+    time_24hr: true,  // Formato de tiempo 24H
+    altFormat: "F j, Y",
+    dateFormat: "Y-m-d H:i",
+    locale: 'es',
+    weekNumbers: true,   // Activa los números de la semana.
+    defaultDate: "today", // Por defecto el calendario se carga con el día actual.
+    maxDate: "today", // El Ãºltimo día que se puede seleccionar es el actual.
+    onReady: [function () { // Cuando flatpickr esta listo se ejecuta esta Función
+        startInterval = this.formatDate(this.selectedDates[0], "Y-m-d");  // Se configura el intervalo de tiempo inicial en el formato deseado.
+        endInterval = startInterval;  // Se configura el intervalo de tiempo final en el formato deseado.
+        tablesAndGraphs();  // Se llama a la funcion que genera los gráficos y tablas.
+
+    }],
+    onChange: [function () {  // Cuando flatpickr cambia se ejecuta esta Función
+        startInterval = this.formatDate(this.selectedDates[0], "Y-m-d");  // Se configura el intervalo de tiempo inicial en el formato deseado.
+        endInterval = startInterval;  // Se configura el intervalo de tiempo final en el formato deseado.
+        tablesAndGraphs();  // Se llama a la funcion que genera los gráficos y tablas.
+
+    }]
+}); // flatpickr
+
+// layout graficos meteorología
+var config = {
+    responsive: true,
+    // displayModeBar: false,
+    modeBarButtonsToRemove: ['zoom2d', 'pan2d', 'select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d', 'resetScale2d', 'hoverClosestGl2d', 'hoverClosestPie', 'toggleHover', 'resetViews', 'sendDataToCloud', 'toggleSpikelines', 'resetViewMapbox', 'hoverClosestCartesian', 'hoverCompareCartesian'],
+    scrollZoom: false
+}
+
+var riegoLayout = () => {
+    return {
+        //title:'Line and Scatter Plot',
+
+        height: 500,
+        autosize: true,
+        margin: {
+            l: 50,
+            r: 60,
+            b: 50,
+            t: 100,
+            pad: 4
+        },
+        showlegend: true,
+        font: {
+            size: 15,
+        },
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: -0.65
+        },
+
+
+        xaxis: {
+            domain: [0.1, 0.92],
+            showspikes: true,
+            tickangle: 60,
+            spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+            type: 'date',
+            fixedrange: true,
+            range: [minusDays(startInterval, 1) + ' 23:59:59', endInterval + ' 23:59:59']
+
+        },
+        //yaxis: {                // Et0                             
+        //    title: 'ET0 [l / mÂ²]',
+        //    //autorange: true,
+        //    range: [0, 8],
+        //    fixedrange: true,
+        //    showspikes: true,
+        //    spikemode: 'toaxis',
+        //    zeroline: false,
+        //    position: 0.001
+        //},
+
+        //yaxis2: {  // CVA del suelo  
+        //    title: 'Contenido volumÃ©trico de agua [%]',
+        //    rangemode: 'nonnegative',
+        //    //autorange: true,
+        //    range: [40, 200],
+        //    anchor: 'free',
+        //    overlaying: 'y',
+        //    side: 'left',
+        //    position: 0.06,
+        //    showgrid: false,
+        //    zeroline: false,
+
+        //    fixedrange: true,
+        //    showspikes: true,
+        //    spikemode: 'toaxis',
+        //    // type: 'linear'
+        //},
+
+        //yaxis3: {
+        //    title: 'Precipitación [l/mÂ²]',
+        //    rangemode: 'nonnegative',
+        //    range: [0, 8],
+        //    //autorange: true,
+        //    anchor: 'free',
+        //    overlaying: 'y',
+        //    side: 'right',
+        //    fixedrange: true,
+        //    showgrid: false,
+        //    showspikes: true,
+        //    spikemode: 'toaxis',
+        //    zeroline: false,
+        //    position: 0.93
+        //    //type: 'linear'
+        //},
+
+        //yaxis4: {
+        //    title: 'Riego [on/off]',
+        //    rangemode: 'nonnegative',
+        //    autorange: true,
+        //    anchor: 'free',
+        //    overlaying: 'y',
+        //    side: 'right',
+        //    position: 0.99,
+        //    showgrid: false,
+        //    zeroline: false,
+
+        //    fixedrange: true,
+        //    showspikes: true,
+        //    spikemode: 'toaxis',
+        //    //type: 'li
+        //}
+
+    }
+};
+
+
+
+//var cultivoLayout = () => {
+//    return    {
+
+//    height: 500,
+//    margin: {
+//        l: 50,
+//        r: 50,
+//        b: 80,
+//        t: 50,
+//        pad: 4
+//    },
+//    autosize: true,
+//    showlegend: true,
+//    font: {
+//        size: 15,
+//    },
+//    legend: {
+//        orientation: 'h',
+//        x: 0,
+//        y: -0.25
+//    },
+
+
+//    xaxis: {
+//        domain: [0.04, 0.92],
+//        showspikes: true,
+//        spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+//        type: 'date'
+
+//    },
+
+//    yaxis: {                // 'Temperatura [Â°C]'                              
+//        title: 'Temperatura [Â°C]',
+//        autorange: true,
+//        fixedrange: true,
+//        showspikes: true,
+//        spikemode: 'toaxis',
+//        zeroline: false,
+//        position: 0.06
+//    },
+//    yaxis2: {  // Humedad [%]  
+//        title: 'Radiación solar [W/mÂ²]',
+//        rangemode: 'nonnegative',
+//        autorange: true,
+
+//        anchor: 'free',
+//        overlaying: 'y',
+//        side: 'left',
+//        position: 0.001,
+//        showgrid: false,
+//        zeroline: false,
+
+//        fixedrange: true,
+//        showspikes: true,
+//        spikemode: 'toaxis',
+//        // type: 'linear'
+//    },
+//    yaxis3: {
+//        title: 'Humedad del Aire [%]',
+//        rangemode: 'nonnegative',
+//        autorange: true,
+//        anchor: 'free',
+//        overlaying: 'y',
+//        side: 'right',
+//        fixedrange: true,
+//        showgrid: false,
+//        showspikes: true,
+//        spikemode: 'toaxis',
+//        zeroline: false,
+//        position: 0.93
+//        //type: 'linear'
+//    },
+
+//}};
+
+
+
+var cultivoLayout = () => {
+    return {
+
+        height: 500,
+        margin: {
+            l: 50,
+            r: 50,
+            b: 80,
+            t: 50,
+            pad: 4
+        },
+        autosize: true,
+        showlegend: true,
+        font: {
+            size: 15,
+        },
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: -0.25
+        },
+
+
+        xaxis: {
+            domain: [0.04, 0.92],
+            showspikes: true,
+            spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+            type: 'date'
+
+        },
+
+        yaxis: {                // 'Temperatura [Â°C]'                              
+            title: 'Temperatura [Â°C]',
+            autorange: true,
+            fixedrange: true,
+            showspikes: true,
+            spikemode: 'toaxis',
+            zeroline: false,
+            position: 0.06
+        }
+
+    }
+};
+
+var tempLayout = () => {
+    return {
+
+        height: 500,
+        margin: {
+            l: 50,
+            r: 50,
+            b: 80,
+            t: 50,
+            pad: 4
+        },
+        autosize: true,
+        showlegend: true,
+        font: {
+            size: 15,
+        },
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: -0.25
+        },
+
+
+        xaxis: {
+            domain: [0.04, 0.92],
+            showspikes: true,
+            spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+            type: 'date'
+
+        },
+
+        yaxis: {                // 'Temperatura [Â°C]'                              
+            title: 'Temperatura [Â°C]',
+            autorange: true,
+            fixedrange: true,
+            showspikes: true,
+            spikemode: 'toaxis',
+            zeroline: false,
+            position: 0.06
+        }
+    }
+};
+
+var radLayout = () => {
+    return {
+
+        height: 500,
+        margin: {
+            l: 50,
+            r: 50,
+            b: 80,
+            t: 50,
+            pad: 4
+        },
+        autosize: true,
+        showlegend: true,
+        font: {
+            size: 15,
+        },
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: -0.25
+        },
+
+
+        xaxis: {
+            domain: [0.04, 0.92],
+            showspikes: true,
+            spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+            type: 'date'
+
+        },
+
+        yaxis2: {
+            title: 'Radiación solar [W/mÂ²]',
+            rangemode: 'nonnegative',
+            autorange: true,
+
+            anchor: 'free',
+            overlaying: 'y',
+            side: 'left',
+            position: 0.001,
+            showgrid: false,
+            zeroline: false,
+
+            fixedrange: true,
+            showspikes: true,
+            spikemode: 'toaxis',
+            // type: 'linear'
+        }
+    }
+};
+
+var etoLayout = () => {
+    return {
+        //title:'Line and Scatter Plot',
+
+        height: 500,
+        autosize: true,
+        margin: {
+            l: 50,
+            r: 60,
+            b: 50,
+            t: 100,
+            pad: 4
+        },
+        showlegend: true,
+        font: {
+            size: 15,
+        },
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: -0.65
+        },
+
+
+        xaxis: {
+            domain: [0.07, 0.92],
+            showspikes: true,
+            tickangle: 60,
+            spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+            type: 'date'
+            //range: [startInterval + ' 00:00:00', endInterval + ' 23:59:59'],
+            //fixedrange: true
+        },
+        yaxis: {                // Et0                             
+            title: 'ET0 [l / m2]',
+            //autorange: true,
+            range: [0, 8],
+            fixedrange: true,
+            showspikes: true,
+            spikemode: 'toaxis',
+            zeroline: false,
+            position: 0.001
+        },
+    }
+};
+
+
+var precLayout = () => {
+    return {
+        //title:'Line and Scatter Plot',
+
+        height: 500,
+        autosize: true,
+        margin: {
+            l: 50,
+            r: 60,
+            b: 50,
+            t: 100,
+            pad: 4
+        },
+        showlegend: true,
+        font: {
+            size: 15,
+        },
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: -0.65
+        },
+
+
+        xaxis: {
+            domain: [0.07, 0.92],
+            showspikes: true,
+            tickangle: 60,
+            spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+
+            fixedrange: true,
+            range: [startInterval + ' 00:00:00', endInterval + ' 23:59:59']
+
+        },
+        yaxis: {
+            title: 'Precipitación [l/m2]',
+            rangemode: 'nonnegative',
+            range: [0, 50],
+            //autorange: true,
+            //anchor: 'free',
+            //overlaying: 'y',
+            //side: 'right',
+            fixedrange: true,
+            showgrid: false,
+            showspikes: true,
+            spikemode: 'toaxis',
+            zeroline: false,
+            rangemode: 'nonnegative',
+            position: 0.001
+            //type: 'linear'
+        },
+    }
+};
+
+
+var humLayout = () => {
+    return {
+
+        height: 500,
+        margin: {
+            l: 50,
+            r: 50,
+            b: 80,
+            t: 50,
+            pad: 4
+        },
+        autosize: true,
+        showlegend: true,
+        font: {
+            size: 15,
+        },
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: -0.25
+        },
+
+
+        xaxis: {
+            domain: [0.04, 0.92],
+            showspikes: true,
+            spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+            type: 'date'
+
+        },
+        yaxis: {
+            title: 'Humedad del Aire [%]',
+            rangemode: 'nonnegative',
+            autorange: true,
+            //anchor: 'free',
+            //overlaying: 'y',
+            //side: 'right',
+            //fixedrange: true,
+            showgrid: false,
+            showspikes: true,
+            spikemode: 'toaxis',
+            zeroline: false,
+            position: 0.06
+            //type: 'linear'
+        },
+
+    }
+};
+
+
+var panelSolarLayout = () => {
+    return {
+        // title:'Line and Scatter Plot',
+
+        height: 500,
+        autosize: true,
+        showlegend: true,
+        font: {
+            size: 15,
+        },
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: -0.25
+        },
+
+        xaxis: {
+            domain: [0.04, 0.95],
+            showspikes: true,
+            spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+            type: 'date'
+        },
+        yaxis: {
+            // autorange: true,
+
+            title: 'Voltaje de la batería [V]',
+            rangemode: 'nonnegative',
+            autorange: true,
+
+            fixedrange: true,
+            showspikes: true,
+            spikemode: 'toaxis',
+            type: 'linear'
+        },
+        yaxis2: {
+            //autorange: true,
+            title: 'Voltaje del panel [V]',
+
+            rangemode: 'nonnegative',
+            autorange: true,
+
+            anchor: 'x',
+            overlaying: 'y',
+            side: 'right',
+            showgrid: false,
+            zeroline: false,
+
+            fixedrange: true,
+            showspikes: true,
+            spikemode: 'toaxis',
+            //type: 'linear'
+        }
+
+    }
+};
+
+var CombinedGraphsLayout = () => {
+    return {
+        // title:'Line and Scatter Plot',
+
+        height: 500,
+        autosize: true,
+        showlegend: true,
+        font: {
+            size: 15,
+        },
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: -0.25
+        },
+
+
+        xaxis: {
+            domain: [0.04, 0.95],
+            showspikes: true,
+            spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+            type: 'date'
+        },
+        yaxis: {
+            // autorange: true,
+
+            title: 'Radiacion Solar[W/mÂ²]',
+            rangemode: 'nonnegative',
+            autorange: true,
+
+            fixedrange: true,
+            showspikes: true,
+            spikemode: 'toaxis',
+            type: 'linear'
+        },
+        yaxis2: {
+            //autorange: true,
+            title: 'Humedad del viento[%]',
+            autorange: true,
+            anchor: 'free',
+            overlaying: 'y',
+            side: 'right',
+            position: 0.95,
+
+        },
+        yaxis3: {
+            //autorange: true,
+            title: 'Velocidad del viento[m/s]',
+
+            autorange: true,
+            anchor: 'free',
+            overlaying: 'y',
+            side: 'right',
+            position: 0.90,
+        },
+        yaxis4: {
+            //autorange: true,
+            title: 'Temperatura[Â°C]',
+
+            rangemode: 'nonnegative',
+            autorange: true,
+
+            anchor: 'x',
+            overlaying: 'y',
+            side: 'right',
+            showgrid: false,
+            zeroline: false,
+
+            fixedrange: true,
+            showspikes: true,
+            spikemode: 'toaxis',
+            //type: 'linear'
+        },
+
+
+    }
+};
+
+var EnfermedadGraphsLayout = () => {
+    return {
+        // title:'Line and Scatter Plot',
+
+        height: 500,
+        autosize: true,
+        showlegend: true,
+        font: {
+            size: 15,
+        },
+        legend: {
+            orientation: 'h',
+            x: 0,
+            y: -0.25
+        },
+
+
+        xaxis: {
+            domain: [0.04, 0.95],
+            showspikes: true,
+            spikemode: 'toaxis', // 'toaxis' or 'across' or 'marker'
+            type: 'date'
+        },
+        yaxis1: {
+            // autorange: true,
+
+            title: 'Radiacion Solar[W/mÂ²]',
+            rangemode: 'nonnegative',
+            autorange: true,
+
+            fixedrange: true,
+            showspikes: true,
+            spikemode: 'toaxis',
+            type: 'linear'
+        },
+        yaxis2: {
+            //autorange: true,
+            title: 'Humedad del viento[%]',
+            autorange: true,
+            anchor: 'free',
+            overlaying: 'y',
+            side: 'righ',
+            position: 0.95,
+
+        },
+        yaxis3: {
+            //autorange: true,
+            title: 'Temperatura[Â°C]',
+
+            rangemode: 'nonnegative',
+            autorange: true,
+
+            anchor: 'x',
+            overlaying: 'y',
+            side: 'right',
+            showgrid: false,
+            zeroline: false,
+            position: 0.98,
+
+            fixedrange: true,
+            showspikes: true,
+            spikemode: 'toaxis',
+            //type: 'linear'
+        },
+
+
+    }
+};
+
+
+function initializeGraphs() {
+
+
+    Plotly.newPlot('combinedGraph', [], CombinedGraphsLayout(), config);
+    Plotly.newPlot('enfermedadplantacionGraph', [], EnfermedadGraphsLayout(), config);
+    Plotly.newPlot('tempGraph', [], tempLayout(), config);
+    Plotly.newPlot('radGraph', [], radLayout(), config);
+    Plotly.newPlot('etoGraph', [], etoLayout(), config);
+    Plotly.newPlot('precGraph', [], precLayout(), config);
+    Plotly.newPlot('humGraph', [], humLayout(), config);
+    //Plotly.newPlot('panelSolarGraph', [], panelSolarLayout(), config);
+}
+
+function flushTables() {
+    var tableBody = document.getElementById('bodyData24');  // Se obtiene la referencia al cuerpo de la tabla
+
+    // Se limpia la tabla
+    while (tableBody.hasChildNodes()) {
+        tableBody.removeChild(tableBody.firstChild);
+    }
+
+    var tableHeader = document.getElementById('tab-header-names'); // Se obtiene la referencia al encabezado de la tabla
+
+    // Se limpia el encabezado de la tabla
+    while (tableHeader.hasChildNodes()) {
+        tableHeader.removeChild(tableHeader.firstChild);
+    }
+
+    // Se limpia el cuerpo de la tabla
+    var tableBody = document.getElementById('bodyData');
+    while (tableBody.hasChildNodes()) {
+        tableBody.removeChild(tableBody.firstChild);
+    }
+
+    // Se limpia el pie de la tabla
+    var tableFooter = document.getElementById('footerData');
+    while (tableFooter.hasChildNodes()) {
+        tableFooter.removeChild(tableFooter.firstChild);
+    }
+}
+
+function flushGraphs() {
+
+    var enfermedadplantacionGraph = document.getElementById('enfermedadplantacionGraph');
+    while (enfermedadplantacionGraph.data.length > 0) {
+        Plotly.deleteTraces(enfermedadplantacionGraph, [0]);
+    }
+
+    var combinedGraph = document.getElementById('combinedGraph');
+    while (combinedGraph.data.length > 0) {
+        Plotly.deleteTraces(combinedGraph, [0]);
+    }
+
+    var tempGraph = document.getElementById('tempGraph');
+    while (tempGraph.data.length > 0) {
+        Plotly.deleteTraces(tempGraph, [0]);
+    }
+
+    var radGraph = document.getElementById('radGraph');
+    while (radGraph.data.length > 0) {
+        Plotly.deleteTraces(radGraph, [0]);
+    }
+
+    var etoGraph = document.getElementById('etoGraph');
+    while (etoGraph.data.length > 0) {
+        Plotly.deleteTraces(etoGraph, [0]);
+    }
+    var precGraph = document.getElementById('precGraph');
+    while (precGraph.data.length > 0) {
+        Plotly.deleteTraces(precGraph, [0]);
+    }
+    var humGraph = document.getElementById('humGraph');
+    while (humGraph.data.length > 0) {
+        Plotly.deleteTraces(humGraph, [0]);
+    }
+
+    //var panelSolarGraph = document.getElementById('panelSolarGraph');
+    //while (panelSolarGraph.data.length > 0) {
+    //    Plotly.deleteTraces(panelSolarGraph, [0]);
+    //}
+
+}
+
+///////////////////////////////////////////////////////////////////
+/// Función que obtiene los datos del API
+
+
+async function getDatafromServer(codigo_eui, fecha) { // Funcion que extrae datos del API
+
+    //return respuesta.json();
+
+    var myHeaders = new Headers();  // Crea los headers 
+
+    // Configura el requerimiento HTTP
+    var myInit = {
+        method: 'GET',
+        headers: myHeaders,
+        mode: 'cors',
+        cache: 'default'
+    };
+
+    // Cadena que contiene el requerimiento
+    var myRequest = new Request('/apiMeteoStation/' + codigo_eui + '/' + fecha, myInit);
+    //console.log('/apiSeletcTimeCall/' + codeType + '/' + stationCode + '/' + agrupacion + '/' + startInterval + '/' + endInterval, myInit)
+
+    // Ejecuta el requerimiento HTTP
+    let response = await fetch(myRequest).catch(function (err) {
+        //console.log('Fetch Error :-S', err);
+    });;
+
+
+    // Evalua la respuesta y retorna un valor correspondiente.
+    if (response.status !== 200) {
+
+        flushTables();
+        flushGraphs();
+        Swal.fire({
+            icon: 'error',
+            title: 'No se encontraron datos',
+            text: 'no hay información de metereología en el día seleccionado',
+
+        });
+        return null;
+    } else {
+        return response.json();
+    }
+}
+
+
+
+async function getDataEto(codigo_eui, fecha) { // Funcion que extrae datos del API
+
+    //return respuesta.json();
+
+    var myHeaders = new Headers();  // Crea los headers 
+
+    // Configura el requerimiento HTTP
+    var myInit = {
+        method: 'GET',
+        headers: myHeaders,
+        mode: 'cors',
+        cache: 'default'
+    };
+
+    // Cadena que contiene el requerimiento
+    var myRequest = new Request('/consultaEto/' + codigo_eui + '/' + fecha, myInit);
+    //console.log('/apiSeletcTimeCall/' + codeType + '/' + stationCode + '/' + agrupacion + '/' + startInterval + '/' + endInterval, myInit)
+
+    // Ejecuta el requerimiento HTTP
+    let response = await fetch(myRequest).catch(function (err) {
+        //console.log('Fetch Error :-S', err);
+    });;
+
+
+    // Evalua la respuesta y retorna un valor correspondiente.
+    if (response.status !== 200) {
+
+        flushTables();
+        flushGraphs();
+        Swal.fire({
+            icon: 'error',
+            title: 'No se encontraron datos',
+            text: 'no hay información de Evapotranspiración del día anterior',
+
+        });
+        return null;
+    } else {
+        return response.json();
+    }
+}
+
+
+
+///////////////////////////////////////////////////////////////////
+/// Funcion que resta un número de días a la fecha provista.
+///
+/// currentDate:  Fecha a la cual se va quitar días
+/// days:         Número de días que se va restar a la fecha.
+/// 
+function takeDays(currentDate, days) {
+    var newDate = new Date(currentDate);
+    newDate.setDate(newDate.getDate() - days);
+
+    var dd = String(newDate.getDate()).padStart(2, '0');
+    var mm = String(newDate.getMonth() + 1).padStart(2, '0'); //January is 0!
+    var yyyy = newDate.getFullYear();
+
+    return yyyy + '-' + mm + '-' + dd; // + ' ' + hour + ':' + minutes + ':' + seconds ; 
+}
+
+function addDays(currentDate, days) {
+    var newDate = new Date(currentDate);
+    newDate.setDate(newDate.getDate() + days);
+
+    var dd = String(newDate.getDate()).padStart(2, '0');
+    var mm = String(newDate.getMonth() + 1).padStart(2, '0'); //January is 0!
+    var yyyy = newDate.getFullYear();
+
+    return yyyy + '-' + mm + '-' + dd; // + ' ' + hour + ':' + minutes + ':' + seconds ; 
+}
+
+initializeGraphs();
+
+///////////////////////////////////////////////////////////////////
+/// Función que genera los gráficos y tablas.
+function tablesAndGraphs() {
+
+    //  Se obtienen los datos del día actual.
+    //var requestedData = getDatafromServer(codeType, stationCode, startInterval + " 00:00:00", endInterval + " 23:59:59", agrupacion); // Almacena la respuesta obtenida del servidor  
+    //  Se obtienen los datos del día anterior.
+    //var requestedLastDayData = getDatafromServer(codeType, stationCode, takeDays(startInterval + " 00:00:00", 1), takeDays(endInterval + " 00:00:00", 1), agrupacion); // Almacena la respuesta obtenida del servidor
+
+    var requestMeteo = getDatafromServer("2CF7F120433011D2", startInterval);
+    var fechaAntes = new Date(startInterval);
+    fechaAntes.setDate((fechaAntes).getDate());
+    var año = fechaAntes.getFullYear(); // Obtener el año de 4 dígitos
+    var mes = ('0' + (fechaAntes.getMonth() + 1)).slice(-2); // Obtener el mes con 2 dígitos (agregando un cero inicial si es necesario)
+    var día = ('0' + fechaAntes.getDate()).slice(-2); // Obtener el día con 2 dígitos (agregando un cero inicial si es necesario)
+    var requestEto = getDataEto("2CF7F120433011D2", año + '-' + mes + '-' + día);
+    var agr = '';
+
+    if (agrupacion == 'raw') { // De acuerdo a la agrupación se muestran los datos crudos o promedios.
+        agr = 'raw_data'; // Se muestran los datos crudos en el intervalo de tiempo seleccionado
+        isRaw = true;
+    }
+    else {
+        agr = 'avg_data'; // Se muestran los datos promedios en el intervalo de tiempo seleccionado
+        isRaw = false;
+    }
+
+    requestEto.then(
+        function requestData(_dataETo) {
+            var ETo = 0;
+            try {
+                if (_dataETo != null) {
+                    var dataETo = JSON.parse(_dataETo.result);
+                    document.getElementById('evapotranspiracion').innerHTML = dataETo['valor_promedio'] + ' l/m2 /dí­a';
+                    ETo = dataETo['valor_promedio'];
+                }
+                //Grafica los datos en grupos predefinidos
+                requestMeteo.then(
+                    function returnData(_data) {
+
+                        var data = JSON.parse(_data.result);
+                        console.log(data);
+                        var TempAvg = {};
+                        var TempMax = {};
+                        var TempMin = {};
+                        var Humedad = {};
+                        var HumedadStack = {};
+                        var VelViento = {};
+                        var radSolarMax = {};
+                        var radSolarStack = {};
+                        var radSolarMin = {};
+
+                        var precipitacion = {};
+                        var panelSolar = {};
+                        var bateria = {};
+
+                        // Se itera por cada parámetro en la lista de parametros
+                        data['device_data'].forEach(currentParameter => {
+
+                            // console.log("parametro actual", currentParameter,agr);
+                            //  Se configuran los gráficos.
+                            if (currentParameter['codigo_parametro'] == '18001') { // Temperatura alta presicion 
+
+
+
+                                TempAvg = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values']['avg_data'],
+                                    yaxis: 'y3',
+                                    mode: 'lines+markers',
+                                    type: 'scatter',
+                                    fill: 'none',
+
+                                    marker: {
+                                        color: '#C7360E',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#C7360E',
+                                        width: 3,
+                                        dash: 'solid'
+                                    },
+                                    name: "Temp prom."
+                                };
+
+                                TempMax = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values']['max_data'],
+                                    yaxis: 'y3',
+                                    mode: 'lines+markers',
+                                    type: 'scatter',
+                                    fill: 'none',
+
+                                    marker: {
+                                        color: '#008000',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#008000',
+                                        width: 3,
+                                        dash: 'dash'
+                                    },
+                                    name: "Temp Max"
+                                };
+
+                                TempMin = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values']['min_data'],
+                                    yaxis: 'y3',
+                                    mode: 'lines+markers',
+                                    type: 'scatter',
+                                    fill: 'none',
+
+                                    marker: {
+                                        color: '#0000FF',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#0000FF',
+                                        width: 3,
+                                        dash: 'dot'
+                                    },
+                                    name: "Temp Min"
+                                };
+                            }
+
+
+
+                            else if (currentParameter['codigo_parametro'] == '18036') { // Humedad
+
+                                Humedad = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values'][agr],
+                                    yaxis: 'y2',
+                                    mode: 'lines+markers',
+                                    fill: '',
+                                    marker: {
+                                        color: '#6FD1FF',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#6FD1FF',
+                                        width: 3
+                                    },
+                                    name: "Humedad del aire"
+                                };
+
+                                HumedadStack = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values'][agr],
+                                    yaxis: 'y3',
+                                    mode: 'lines+markers',
+                                    fill: '',
+                                    marker: {
+                                        color: '#6FD1FF',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#6FD1FF',
+                                        width: 3
+                                    },
+                                    name: "Humedad del aire"
+                                };
+
+                            }
+                            else if (currentParameter['codigo_parametro'] == '18120') { // Velocidad viento
+
+                                VelViento = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values'][agr],
+                                    yaxis: 'y3',
+                                    mode: 'lines+markers',
+                                    fill: '',
+                                    marker: {
+                                        color: '#5946F0',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#5946F0',
+                                        width: 3
+                                    },
+                                    name: "Velocidad del viento"
+                                };
+
+                            }
+                            else if (currentParameter['codigo_parametro'] == '18054') { //Radiacion solar que tiene y pinta los graficos 
+
+                                radSolar = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values']['avg_data'],
+                                    yaxis: 'y1',
+                                    mode: 'lines+markers',
+                                    fill: 'tozeroy',
+                                    marker: {
+                                        color: '#FFE376',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#FFE37',
+                                        width: 3
+                                    },
+                                    name: "Radiación Solar prom."
+                                };
+
+                                radSolarMax = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values']['max_data'],
+                                    //showlegend:false,
+                                    yaxis: 'y2',
+                                    mode: 'lines+markers',
+                                    type: 'scatter',
+                                    fill: 'tonexty',
+                                    fillcolor: 'rgba(255, 195, 105, 0.5)',
+                                    marker: {
+                                        color: '#E8BF5F',
+                                        size: 3
+                                    },
+                                    line: {
+                                        color: '#E8BF5F',
+                                        width: 1
+                                    },
+                                    name: "Rad máx"
+                                };
+
+                                radSolarStack = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values']['avg_data'],
+                                    yaxis: 'y1',
+                                    mode: 'lines+markers',
+                                    type: 'scatter',
+                                    fill: 'tonexty',
+                                    fillcolor: 'rgba(255, 227, 118, 0.5)',
+                                    marker: {
+                                        color: '#BFAB58',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#BFAB58',
+                                        width: 3
+                                    },
+                                    name: "Radiación Solar prom."
+                                };
+
+                                radSolarMin = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values']['min_data'],
+                                    //showlegend: false,
+                                    yaxis: 'y2',
+                                    mode: 'lines+markers',
+                                    type: 'scatter',
+                                    fill: 'tozeroy',
+                                    fillcolor: 'rgba(255, 255, 105, 0.5)',
+                                    marker: {
+                                        color: '#E8BF5F',
+                                        size: 3
+                                    },
+                                    line: {
+                                        color: '#FFE376',
+                                        width: 1
+                                    },
+                                    name: "Rad mÃ­n"
+                                };
+
+                            }
+                            else if (currentParameter['codigo_parametro'] == '17021') { // ETo
+
+                                var EtoData = [0];
+
+                                if (agr == 'raw_data') {
+
+                                    for (var iter = 0; iter < currentParameter['values'][agr].length; iter++) {
+
+                                        currentValue = currentParameter['values'][agr][iter];
+
+                                        if (iter < currentParameter['values'][agr].length - 1) {
+
+                                            if (currentParameter['values'][agr][iter + 1] != 0) {
+                                                continue;
+                                            }
+                                            else {
+                                                currentParameter['values'][agr][iter + 1] = currentValue;
+                                            }
+                                        }
+                                        else {
+                                            if (currentParameter['values'][agr][iter] != 0) {
+                                                continue;
+                                            }
+                                            else {
+                                                currentParameter['values'][agr][iter] = currentParameter['values'][agr][iter - 1];
+                                            }
+                                        }
+                                    }
+
+                                    EtoData = currentParameter['values']['avg_data'];
+
+                                    Eto = {
+                                        x: data['device_dates'].filter(meteoDate => meteoDate.includes('T00:00:00')),
+                                        y: EtoData,
+                                        type: 'bar',
+                                        yaxis: 'y1',
+                                        // fill: 'tozeroy',
+                                        marker: {
+                                            color: '#FF0501',
+                                            size: 8
+                                        },
+                                        line: {
+                                            color: '#FF0501',
+                                            width: 3
+                                        },
+                                        name: "ETo"
+                                    };
+                                }
+                                else {
+
+                                    for (var iter = 0; iter < currentParameter['values']['sum_data'].length; iter++) {
+
+                                        currentValue = currentParameter['values']['sum_data'][iter];
+
+                                        if (iter < currentParameter['values']['sum_data'].length - 1) {
+
+                                            if (currentParameter['values']['sum_data'][iter + 1] != 0) {
+                                                continue;
+                                            }
+                                            else {
+                                                currentParameter['values']['sum_data'][iter + 1] = currentValue;
+                                            }
+                                        }
+                                        else {
+                                            if (currentParameter['values']['sum_data'][iter] != 0) {
+                                                continue;
+                                            }
+                                            else {
+                                                currentParameter['values']['sum_data'][iter] = currentParameter['values']['sum_data'][iter - 1];
+                                            }
+                                        }
+                                    }
+
+                                    EtoData = currentParameter['values']['avg_data'];
+
+                                    Eto = {
+                                        x: data['device_dates'].filter(meteoDate => meteoDate.includes('T00:00:00')),
+                                        y: EtoData,
+                                        type: 'bar',
+                                        // fill: 'tozeroy',
+                                        yaxis: 'y1',
+                                        opacity: 0.5,
+                                        marker: {
+                                            color: '#FA9351',
+                                            size: 8
+                                        },
+                                        line: {
+                                            color: '#FA9351',
+                                            width: 1
+                                        },
+                                        name: "ETo"
+                                    };
+
+                                }
+
+                            }
+                            else if (currentParameter['codigo_parametro'] == '17006') { // Direccion viento
+
+                                dirViento = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values'][agr],
+                                    yaxis: 'y2',
+                                    mode: 'markers',
+                                    fill: '',
+                                    marker: {
+                                        color: 'rgb(128, 0, 128)',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: 'rgb(128, 0, 128)',
+                                        width: 3
+                                    },
+                                    name: "Dirección viento"
+                                };
+
+                            }
+                            else if (currentParameter['codigo_parametro'] == '18084') { // Precipitacion
+
+                                precipitacion = {
+                                    x: data['device_dates'],
+                                    y: isRaw ? currentParameter['values'][agr] : currentParameter['values']['sum_data'],
+                                    yaxis: 'y1',
+                                    opacity: 0.5,
+                                    type: 'bar',
+                                    fill: '',
+                                    marker: {
+                                        color: '#66BCD9',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#66BCD9',
+                                        width: 3
+                                    },
+
+                                    name: "Precipitación"
+                                };
+
+                            }
+                            else if (currentParameter['codigo_parametro'] == '18095') { // Punto Rocio
+
+                                pntRocio = {
+                                    x: data['device_dates'],
+                                    y: currentParameter['values'][agr],
+                                    yaxis: 'y3',
+                                    mode: 'lines+markers',
+                                    fill: '',
+                                    marker: {
+                                        color: 'rgb(128, 0, 128)',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: 'rgb(128, 0, 128)',
+                                        width: 3
+                                    },
+                                    name: "Punto Rocio"
+                                };
+
+                            }
+                            else if (currentParameter['codigo_parametro'] == '17009') { // Humedad hoja
+
+                                humHoja = {
+                                    x: data['device_dates'],
+                                    y: isRaw ? currentParameter['values'][agr] : currentParameter['values']['sum_data'],
+                                    yaxis: 'y3',
+                                    opacity: 0.75,
+                                    type: 'bar',
+                                    fill: '',
+                                    marker: {
+                                        color: '#6F9E41',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#6F9E41',
+                                        width: 3
+                                    },
+
+
+                                    name: "Humedad hoja"
+                                };
+
+                            }
+                            else if (currentParameter['codigo_parametro'] == '17002') { // Panel Solar
+
+                                var tempData = [];
+
+                                var iter = 0;
+                                currentParameter['values'][agr].forEach(value => {
+
+                                    tempData[iter] = Math.round(((value / 1000) + Number.EPSILON) * 100) / 100;
+                                    iter++;
+                                })
+
+                                panelSolar = {
+                                    x: data['device_dates'],
+                                    y: tempData,
+                                    yaxis: 'y2',
+                                    mode: 'lines+markers',
+                                    fill: 'tozeroy',
+                                    marker: {
+                                        color: '#FFE376',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#FFE376',
+                                        width: 3
+                                    },
+                                    name: "Panel Solar"
+                                };
+
+                            }
+                            else if (currentParameter['codigo_parametro'] == '17008') { // Batería
+
+                                var tempData = [];
+
+                                var iter = 0;
+                                currentParameter['values'][agr].forEach(value => {
+
+                                    tempData[iter] = Math.round(((value / 1000) + Number.EPSILON) * 100) / 100;
+                                    iter++;
+                                })
+
+                                bateria = {
+                                    x: data['device_dates'],
+                                    y: tempData,
+                                    mode: 'lines+markers',
+                                    fill: '',
+                                    marker: {
+                                        color: '#FF8E4B',
+                                        size: 8
+                                    },
+                                    line: {
+                                        color: '#FF8E4B',
+                                        width: 3
+                                    },
+                                    name: "Batería"
+                                };
+
+                            }
+
+
+                        });
+
+                        var dataPrec = [precipitacion];
+
+                        /*const data3 = [TempMin, TempStack, TempMax, radSolarMin, radSolarStack, radSolarMax, HumedadStack,Eto];*/
+                        const dataTemp = [TempMin, TempAvg, TempMax]; //grafico datos relacionados para  el cultivo
+                        var dataRad = [radSolarMin, radSolarStack, radSolarMax];
+                        const dataHum = [Humedad];
+                        var data4 = [panelSolar, bateria];
+                        var dataComb = [TempAvg, radSolarStack, HumedadStack, VelViento];  //Componentes del EtO
+                        var dataEnf = [TempAvg, radSolarStack, HumedadStack]  //Componentes enfermedad de plantacion
+
+                        Plotly.react('precGraph', dataPrec, precLayout(), config);
+                        Plotly.react('tempGraph', dataTemp, tempLayout(), config);
+                        Plotly.react('radGraph', dataRad, radLayout(), config);
+                        Plotly.react('humGraph', dataHum, humLayout(), config);
+                        //Plotly.react('panelSolarGraph', data4, panelSolarLayout(), config);
+                        Plotly.react('combinedGraph', dataComb, CombinedGraphsLayout(), config); //Llamada a la funcion de Ploty para que ingrese la data al grafico
+                        Plotly.react('enfermedadplantacionGraph', dataEnf, EnfermedadGraphsLayout(), config);
+
+                        try {
+                            var listaValores = [];
+                            listaValores.push(ETo);
+                            var eto = {
+                                x: data['device_dates'].filter(meteoDate => meteoDate.includes('T00:00:00')),
+                                y: listaValores,
+                                //width:[0.8],
+                                //yaxis: 'y1',
+                                opacity: 0.70,
+                                type: 'bar',
+                                fill: '',
+                                marker: {
+                                    color: '#FA9351',
+                                    //size: 8
+                                },
+                                line: {
+                                    color: '#FA9351',
+                                    width: 1.5
+                                },
+                                name: 'Eto'
+
+                            };
+
+                            var config;
+                            var data2 = [eto];
+                            Plotly.react('etoGraph', data2, etoLayout(), config);
+                        } catch (error) {
+                        }
+                    });
+
+                // Inserta los datos en la tabla del registro de datos  id de la tabla = tablaregistro
+                requestMeteo.then(
+                    function returnData(_data) {
+                        var data = JSON.parse(_data.result);
+                        //Se ordena la tabla por medio de la secuencia
+                        data['device_data'].sort((par_a, par_b) => parseInt(par_a.secuencia) > parseInt(par_b.secuencia) ? 1 : -1)
+
+
+                        const miTabla = document.getElementById("tablaregistro");
+                        miTabla.removeChild(miTabla.getElementsByTagName("thead")[0]);
+
+                        const thead = document.createElement('thead');
+                        thead.classList.add("table-meteo-header");
+
+                        var celda1Head = document.createElement('th');
+                        celda1Head.innerText = "Fecha y Hora";
+                        celda1Head.classList.add("text-center");
+                        thead.appendChild(celda1Head);
+
+                        data['device_data'].forEach(parametro => {
+
+                            if (parametro['codigo_parametro'] == "18001") {
+
+                                var celdaHeadProm = document.createElement('th');
+                                celdaHeadProm.innerText = "Temp Aire Prom" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadProm.classList.add("text-center");
+                                thead.appendChild(celdaHeadProm);
+
+                                var celdaHeadMax = document.createElement('th');
+                                celdaHeadMax.innerText = "Temp Aire Max" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadMax.classList.add("text-center");
+                                thead.appendChild(celdaHeadMax);
+
+                                var celdaHeadMin = document.createElement('th');
+                                celdaHeadMin.innerText = "Temp Aire Min" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadMin.classList.add("text-center");
+                                thead.appendChild(celdaHeadMin);
+
+                            }
+                            else if (parametro['codigo_parametro'] == "18036") {
+
+                                var celdaHeadProm = document.createElement('th');
+                                celdaHeadProm.innerText = "Humedad Aire" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadProm.classList.add("text-center");
+                                thead.appendChild(celdaHeadProm);
+
+                                var celdaHeadMax = document.createElement('th');
+                                celdaHeadMax.innerText = "Humedad Aire Max" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadMax.classList.add("text-center");
+                                thead.appendChild(celdaHeadMax);
+
+                                var celdaHeadMin = document.createElement('th');
+                                celdaHeadMin.innerText = "Humedad Aire Min" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadMin.classList.add("text-center");
+                                thead.appendChild(celdaHeadMin);
+
+
+                            }
+                            else if (parametro['codigo_parametro'] == "18095") {
+
+                                var celdaHeadProm = document.createElement('th');
+                                celdaHeadProm.innerText = "Punto Rocio Prom" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadProm.classList.add("text-center");
+                                thead.appendChild(celdaHeadProm);
+
+                                var celdaHeadMin = document.createElement('th');
+                                celdaHeadMin.innerText = "Punto Rocio Min" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadMin.classList.add("text-center");
+                                thead.appendChild(celdaHeadMin);
+                            }
+                            else if (parametro['codigo_parametro'] == "18120") {
+
+                                var celdaHeadProm = document.createElement('th');
+                                celdaHeadProm.innerText = "Velocidad Viento" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadProm.classList.add("text-center");
+                                thead.appendChild(celdaHeadProm);
+
+                                var celdaHeadMax = document.createElement('th');
+                                celdaHeadMax.innerText = "Velocidad Viento Max" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadMax.classList.add("text-center");
+                                thead.appendChild(celdaHeadMax);
+
+                            }
+                            else if (parametro['codigo_parametro'] == "18136") {
+
+                                var celdaHeadMax = document.createElement('th');
+                                celdaHeadMax.innerText = "Velocidad Viento Max Ráfaga" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadMax.classList.add("text-center");
+                                thead.appendChild(celdaHeadMax);
+
+
+                            }
+                            else if (parametro['codigo_parametro'] == "18128") {
+
+                                var celdaHeadProm = document.createElement('th');
+                                celdaHeadProm.innerText = "Dirección Viento" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadProm.classList.add("text-center");
+                                thead.appendChild(celdaHeadProm);
+
+                            }
+                            else if (parametro['codigo_parametro'] == "18054") {
+
+                                var celdaHeadSuma = document.createElement('th');
+                                celdaHeadSuma.innerText = "Radiación Solar" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadSuma.classList.add("text-center");
+                                thead.appendChild(celdaHeadSuma);
+
+
+                            }
+                            else if (parametro['codigo_parametro'] == "18180") {
+
+                                var celdaHeadProm = document.createElement('th');
+                                celdaHeadProm.innerText = "Evapotranspiración" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadProm.classList.add("text-center");
+                                thead.appendChild(celdaHeadProm);
+
+
+                            }
+                            else if (parametro['codigo_parametro'] == "18112") {
+
+                                var celdaHeadSuma = document.createElement('th');
+                                celdaHeadSuma.innerText = "Precipitación" + " [" + parametro['unidad_parametro'] + "]";
+                                celdaHeadSuma.classList.add("text-center");
+                                thead.appendChild(celdaHeadSuma);
+
+
+                            }
+
+                        });
+                        //Vamos a crear el header
+
+                        var celdaHeadETo = document.createElement('th');
+                        celdaHeadETo.innerText = "Evapotranspiración [L/m2]";
+                        celdaHeadETo.classList.add("text-center");
+                        thead.appendChild(celdaHeadETo);
+
+                        miTabla.appendChild(thead);
+
+
+                        miTabla.removeChild(miTabla.getElementsByTagName("tbody")[0]);
+
+                        const tbody = document.createElement('tbody');
+                        tbody.classList.add("table-meteo-body");
+
+
+
+                        //Matriz para capturar los datos de la tabla, para calcular promedio, minimo y maximo por columna
+                        var matriz = [];
+                        for (let i = 0; i < data['device_dates'].length; i++) {
+
+                            var row = document.createElement('tr');
+                            var fila = [];
+
+                            var celda1 = document.createElement('td');
+                            celda1.innerText = data['device_dates'][i];
+                            celda1.classList.add("text-center");
+                            row.appendChild(celda1);
+
+                            data['device_data'].forEach(parametro => {
+
+
+
+                                if (parametro['codigo_parametro'] == "18001") {
+
+                                    var celdaProm = document.createElement('td');
+                                    celdaProm.innerText = parametro['values']['avg_data'][i];
+                                    fila.push(parametro['values']['avg_data'][i]);
+                                    celdaProm.classList.add("text-center");
+                                    row.appendChild(celdaProm);
+
+                                    var celdaMax = document.createElement('td');
+                                    celdaMax.innerText = parametro['values']['max_data'][i];
+                                    fila.push(parametro['values']['max_data'][i]);
+                                    celdaMax.classList.add("text-center");
+                                    row.appendChild(celdaMax);
+
+                                    var celdaMin = document.createElement('td');
+                                    celdaMin.innerText = parametro['values']['min_data'][i];
+                                    fila.push(parametro['values']['min_data'][i]);
+                                    celdaMin.classList.add("text-center");
+                                    row.appendChild(celdaMin);
+
+                                }
+                                else if (parametro['codigo_parametro'] == "18036") {
+
+                                    var celdaProm = document.createElement('td');
+                                    celdaProm.innerText = parametro['values']['avg_data'][i];
+                                    fila.push(parametro['values']['avg_data'][i]);
+                                    celdaProm.classList.add("text-center");
+                                    row.appendChild(celdaProm);
+
+                                    var celdaMax = document.createElement('td');
+                                    celdaMax.innerText = parametro['values']['max_data'][i];
+                                    fila.push(parametro['values']['max_data'][i]);
+                                    celdaMax.classList.add("text-center");
+                                    row.appendChild(celdaMax);
+
+                                    var celdaMin = document.createElement('td');
+                                    celdaMin.innerText = parametro['values']['min_data'][i];
+                                    fila.push(parametro['values']['min_data'][i]);
+                                    celdaMin.classList.add("text-center");
+                                    row.appendChild(celdaMin);
+
+
+                                }
+                                else if (parametro['codigo_parametro'] == "18095") {
+
+                                    var celdaProm = document.createElement('td');
+                                    celdaProm.innerText = parametro['values']['avg_data'][i];
+                                    fila.push(parametro['values']['avg_data'][i]);
+                                    celdaProm.classList.add("text-center");
+                                    row.appendChild(celdaProm);
+
+                                    var celdaMin = document.createElement('td');
+                                    celdaMin.innerText = parametro['values']['min_data'][i];
+                                    fila.push(parametro['values']['min_data'][i]);
+                                    celdaMin.classList.add("text-center");
+                                    row.appendChild(celdaMin);
+                                }
+                                else if (parametro['codigo_parametro'] == "18120") {
+
+                                    var celdaProm = document.createElement('td');
+                                    celdaProm.innerText = parametro['values']['avg_data'][i];
+                                    fila.push(parametro['values']['avg_data'][i]);
+                                    celdaProm.classList.add("text-center");
+                                    row.appendChild(celdaProm);
+
+                                    var celdaMax = document.createElement('td');
+                                    celdaMax.innerText = parametro['values']['max_data'][i];
+                                    fila.push(parametro['values']['max_data'][i]);
+                                    celdaMax.classList.add("text-center");
+                                    row.appendChild(celdaMax);
+
+                                }
+                                else if (parametro['codigo_parametro'] == "18136") {
+
+                                    var celdaMax = document.createElement('td');
+                                    celdaMax.innerText = parametro['values']['max_data'][i];
+                                    fila.push(parametro['values']['max_data'][i]);
+                                    celdaMax.classList.add("text-center");
+                                    row.appendChild(celdaMax);
+
+
+                                }
+                                else if (parametro['codigo_parametro'] == "18128") {
+
+                                    var celdaProm = document.createElement('td');
+                                    celdaProm.innerText = parametro['values']['avg_data'][i];
+                                    fila.push(parametro['values']['avg_data'][i]);
+                                    celdaProm.classList.add("text-center");
+                                    row.appendChild(celdaProm);
+
+                                }
+                                else if (parametro['codigo_parametro'] == "18054") {
+
+                                    var celdaSuma = document.createElement('td');
+                                    celdaSuma.innerText = parametro['values']['sum_data'][i];
+                                    fila.push(parametro['values']['sum_data'][i]);
+                                    celdaSuma.classList.add("text-center");
+                                    row.appendChild(celdaSuma);
+
+
+                                }
+                                else if (parametro['codigo_parametro'] == "18180") {
+
+                                    var celdaHeadProm = document.createElement('td');
+                                    celdaHeadProm.innerText = parametro['values']['avg_data'][i];
+                                    fila.push(parametro['values']['avg_data'][i]);
+                                    celdaHeadProm.classList.add("text-center");
+                                    row.appendChild(celdaHeadProm);
+
+
+                                }
+                                else if (parametro['codigo_parametro'] == "18112") {
+
+                                    var celdaHeadSuma = document.createElement('td');
+                                    celdaHeadSuma.innerText = parametro['values']['sum_data'][i];
+                                    fila.push(parametro['values']['sum_data'][i]);
+                                    celdaHeadSuma.classList.add("text-center");
+                                    row.appendChild(celdaHeadSuma);
+
+
+                                }
+
+                            });
+
+                            var celdaETo = document.createElement('td');
+                            if (i == 0) {
+                                celdaETo.innerText = ETo;
+                                fila.push(ETo);
+                            } else {
+                                celdaETo.innerText = "-";
+                                fila.push(0);
+                            }
+                            celdaETo.classList.add("text-center");
+                            row.appendChild(celdaETo);
+
+
+                            matriz.push(fila);
+                            tbody.appendChild(row);
+                        }
+
+                        var detalle = ["Mínimo", "Máximo", "Promedio"];
+                        for (let i = 0; i < detalle.length; i++) {
+                            var row = document.createElement('tr');
+
+                            var celda1 = document.createElement('td');
+                            celda1.innerText = detalle[i];
+                            celda1.classList.add("text-center", "table-totals");
+                            row.appendChild(celda1);
+
+                            for (let j = 0; j < matriz[0].length; j++) {
+                                var columna = matriz.map(function (fila) {
+                                    return fila[j]; // Obtener el primer elemento de cada fila
+                                });
+
+                                if (j != matriz[0].length - 1) {
+                                    if (i == 0) {
+                                        var celdadato = document.createElement('td');
+                                        celdadato.innerText = Math.min(...columna);
+                                        celdadato.classList.add("text-center", "table-totals");
+                                    }
+                                    else if (i == 1) {
+                                        var celdadato = document.createElement('td');
+                                        celdadato.innerText = Math.max(...columna);
+                                        celdadato.classList.add("text-center", "table-totals");
+                                    }
+                                    else if (i == 2) {
+                                        var celdadato = document.createElement('td');
+                                        var suma = columna.reduce((a, b) => a + b, 0);
+                                        celdadato.innerText = (suma / columna.length).toFixed(2);
+                                        celdadato.classList.add("text-center", "table-totals");
+                                    }
+                                } else {
+                                    //EVAPOTRANSPPIRACION
+                                    var celdadato = document.createElement('td');
+                                    celdadato.innerText = ETo;
+                                    celdadato.classList.add("text-center", "table-totals");
+
+                                }
+
+
+                                row.appendChild(celdadato);
+                            }
+                            tbody.appendChild(row);
+                        }
+
+                        miTabla.appendChild(tbody);
+
+                    });
+
+                // Inserta los datos en la tabla de 24 horas
+                requestMeteo.then(
+                    function returnData(_data) {
+                        var data = JSON.parse(_data.result);
+                        //Se ordena la tabla por medio de la secuencia
+                        data['device_data'].sort((par_a, par_b) => parseInt(par_a.secuencia) > parseInt(par_b.secuencia) ? 1 : -1)
+
+                        const tabla = document.getElementById("24Hlog");
+                        const tbody = document.getElementById('bodyData24');
+                        while (tbody.hasChildNodes()) {
+                            tbody.removeChild(tbody.firstChild);
+                        }
+                        tbody.classList.add("table-meteo-body");
+                        fechasHoras = data['device_dates'];
+
+                        var rowETo = document.createElement('tr');
+
+                        var celdaEto1 = document.createElement('td');
+                        celdaEto1.innerText = "EVAPOTRANSPIRACIÓN";
+                        celdaEto1.classList.add("text-center", "table-totals");
+                        rowETo.appendChild(celdaEto1);
+
+                        for (let i = 0; i < 24; i++) {
+
+                            var celda = document.createElement('td');
+                            if (i == 0) {
+                                celda.innerText = ETo;
+                            } else {
+                                celda.innerText = "-";
+                            }
+                            celda.classList.add("text-center");
+                            rowETo.appendChild(celda);
+
+                        }
+
+                        for (let i = 0; i < 4; i++) {
+
+                            var celda = document.createElement('td');
+                            celda.innerText = ETo;
+                            celda.classList.add("text-center", "table-totals");
+                            rowETo.appendChild(celda);
+
+                        }
+                        tbody.appendChild(rowETo);
+
+                        data['device_data'].forEach(parametro => {
+
+                            var row = document.createElement('tr');
+
+                            var celda1 = document.createElement('td');
+                            celda1.innerText = parametro['nombre_parametro'];
+                            celda1.classList.add("text-center", "table-totals");
+                            row.appendChild(celda1);
+
+                            for (let i = 0; i < 24; i++) {
+
+                                if (parametro['codigo_parametro'] == "18054" || parametro['codigo_parametro'] == "18084" || parametro['codigo_parametro'] == "18140") {
+                                    var celda = document.createElement('td');
+                                    celda.innerText = parametro['values']['sum_data'][i];
+                                    celda.classList.add("text-center");
+                                    row.appendChild(celda);
+                                } else {
+                                    var celda = document.createElement('td');
+                                    celda.innerText = parametro['values']['avg_data'][i];
+                                    celda.classList.add("text-center");
+                                    row.appendChild(celda);
+                                }
+
+                            }
+
+                            var min = document.createElement('td');
+                            min.innerText = Math.min(...parametro['values']['min_data']);
+                            min.classList.add("text-center", "table-totals");
+                            row.appendChild(min);
+
+                            var max = document.createElement('td');
+                            max.innerText = Math.max(...parametro['values']['max_data']);
+                            max.classList.add("text-center", "table-totals");
+                            row.appendChild(max);
+
+                            var prom = document.createElement('td');
+                            var suma = (parametro['values']['avg_data']).reduce((a, b) => a + b, 0);
+                            prom.innerText = (suma / parametro['values']['avg_data'].length).toFixed(2);
+                            prom.classList.add("text-center", "table-totals");
+                            row.appendChild(prom);
+
+                            if (parametro['codigo_parametro'] == "18054" || parametro['codigo_parametro'] == "18084" || parametro['codigo_parametro'] == "18140") {
+                                var sum = document.createElement('td');
+                                sum.innerText = (parametro['values']['sum_data']).reduce((a, b) => a + b, 0).toFixed(2);
+                                sum.classList.add("text-center", "table-totals");
+                                row.appendChild(sum);
+                            } else {
+                                var sum = document.createElement('td');
+                                sum.innerText = "-";
+                                sum.classList.add("text-center", "table-totals");
+                                row.appendChild(sum);
+                            }
+
+
+                            tbody.appendChild(row);
+                        })
+                    });
+
+            } catch (error) {
+            }
+        }
+    );
+
+
+}
+
+
+///////////////////////////////////////////////////////////////////
+/// Función que oculta los parametros dentro del arreglo hideParams.
+function Hide() {
+
+    hideParams.forEach(param => {
+
+        var currentParam = [...document.getElementsByClassName(param)];
+
+        currentParam.forEach(element => {
+
+            element.style.display = 'none';
+
+        });
+
+    });
+
+}
+
+
+///////////////////////////////////////////////////////////////////
+/// Función que descarga las tablas como un documento de Excel.
+var tableToExcel = (function () {
+    var uri = 'data:application/vnd.ms-excel;base64,',
+        template = '<html  xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"' +
+            ' xmlns="http://www.w3.org/TR/REC-html40">' +
+            '<meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8"><head>' +
+            '<!--[if gte mso 9]>' +
+            '<xml><x:ExcelWorkbook>' +
+
+            '<x:ExcelWorksheets>' +
+            '<x:ExcelWorksheet>' +
+            '<x:Name>{worksheet}' +
+            '</x:Name>' +
+            '<x:WorksheetOptions>' +
+            '<x:defaultRowHeight>27px</x:defaultRowHeight>' +
+
+            '<x:Zoom>70</x:Zoom>' +
+
+            '<x:DisplayGridlines/>' +
+            '</x:WorksheetOptions>' +
+            '</x:ExcelWorksheet>' +
+            '</x:ExcelWorksheets>' +
+            '</x:ExcelWorkbook>' +
+            '</xml><![endif]-->' +
+            '</head><body><table><caption>{table}</caption></table></body></html>'
+    base64 = function (s) {
+        return window.btoa(unescape(encodeURIComponent(s)))
+    },
+        format = function (s, c) {
+            return s.replace(/{(\w+)}/g, function (m, p) {
+                return c[p];
+            })
+        }
+    return function (table, name) {
+        if (!table.nodeType) table = document.getElementById(table)
+
+        var ctx = {
+            worksheet: name || 'Worksheet',
+            table: table.innerHTML
+        }
+        window.location.href = uri + base64(format(template, ctx))
+    }
+})()
+
+
+
+/*$('#gustavo').DataTable();*/
+
+
+///////////////////////////////////////////////////////////////////
+/// Función que descarga las tablas como un documento de Excel.
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
